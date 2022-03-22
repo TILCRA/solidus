@@ -42,13 +42,48 @@ module Spree
           where(spree_orders_promotions: { order_id: order.id }).readonly(false).to_a
       end
 
-      def sale_promotions
-        Spree::Promotion.where(apply_automatically: true).active.includes(:promotion_rules)
-      end
-
       def promotion_code(promotion)
         order_promotion = Spree::OrderPromotion.where(order: order, promotion: promotion).first
         order_promotion.present? ? order_promotion.promotion_code : nil
+      end
+
+      def sale_promotions
+        scope = Spree::Promotion.where(apply_automatically: true).active.includes(:promotion_rules).distinct
+
+        Rails.application.config.spree.promotions.rules.each do |rule_class|
+          next unless rule_class.respond_to? :excluded_promotions_for_order
+
+          scope = scope.where.not(id: rule_class.excluded_promotions_for_order(order).select(:id))
+        end
+
+        # Filter promotions that are not eligible for current_user.
+        scope = scope.select do |promotion|
+          promotion.rules.where("spree_promotion_rules.type = 'Spree::Promotion::Rules::User'").none? ||
+            promotion.rules.where("spree_promotion_rules.type = 'Spree::Promotion::Rules::User'")
+              .flat_map(&:user_ids).include?(order.user_id)
+        end
+
+        # Filter promotions that are not eligible for the selected products in the order.
+        scope = scope.select do |promotion|
+          promotion.rules.where("spree_promotion_rules.type = 'Spree::Promotion::Rules::Product'").none? ||
+            order.product_ids.flat_map { |p_id| promotion.rules.where("spree_promotion_rules.type = 'Spree::Promotion::Rules::Product'").flat_map(&:product_ids).include?(p_id) }.include?(true)
+        end
+
+        # Filter promotions that are not eligible for the order's store.
+        scope = scope.select do |promotion|
+          promotion.rules.where("spree_promotion_rules.type = 'Spree::Promotion::Rules::Store'").none? ||
+            promotion.rules.where("spree_promotion_rules.type = 'Spree::Promotion::Rules::Store'").flat_map(&:store_ids)
+              .include?(order.store_id)
+        end
+
+        scope = scope.select do |promotion|
+          promotion.rules.where("spree_promotion_rules.type = 'Spree::Promotion::Rules::Taxon'").none? ||
+            order.products.flat_map(&:taxon_ids).uniq.map { |taxon_id|
+              promotion.rules.where("spree_promotion_rules.type = 'Spree::Promotion::Rules::Taxon'").flat_map(&:taxon_ids).include?(taxon_id)
+            }.include?(true)
+        end
+
+        scope
       end
     end
   end

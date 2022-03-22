@@ -60,6 +60,68 @@ module Spree
           include_context "creates an order promotion"
         end
 
+        context "promotion does not activate for other items" do
+          let(:other_line_item) { create(:line_item) }
+          let!(:rule) { Promotion::Rules::Product.create(products: [line_item.product], promotion: promotion) }
+          let!(:other_rule) { Promotion::Rules::Product.create(products: [other_line_item.product], promotion: promotion) }
+
+          include_context "creates the adjustment"
+          include_context "creates an order promotion"
+        end
+
+        context "promotion activates for store" do
+          let!(:rule) { Promotion::Rules::Store.create(stores: [order.store], promotion: promotion) }
+
+          include_context "creates the adjustment"
+          include_context "creates an order promotion"
+        end
+
+        context "promotion does not activate for other store" do
+          let(:other_store) { create(:store) }
+          let(:other_promotion) { create(:promotion, apply_automatically: true) }
+          let!(:other_rule) { Promotion::Rules::Store.create(stores: [other_store], promotion: other_promotion) }
+          let!(:rule) { Promotion::Rules::Store.create(stores: [order.store], promotion: promotion) }
+
+          include_context "creates the adjustment"
+          include_context "creates an order promotion"
+
+          it "doesn't connect the promotion to the order" do
+            expect {
+              subject.activate
+            }.to change { order.promotions.count }.by(1)
+          end
+
+          it "doesn't create an adjustment" do
+            expect {
+              subject.activate
+            }.to change { adjustable.adjustments.count }.by(1)
+          end
+        end
+
+        context "promotion activates for user" do
+          let!(:rule) { Promotion::Rules::User.create(users: [order.user], promotion: promotion) }
+
+          include_context "creates the adjustment"
+          include_context "creates an order promotion"
+        end
+
+        context "promotion does not activate for other user" do
+          let(:user) { create(:user) }
+          let!(:rule) { Promotion::Rules::User.create(users: [user], promotion: promotion) }
+
+          it "doesn't connect the promotion to the order" do
+            expect {
+              subject.activate
+            }.to change { order.promotions.count }.by(0)
+          end
+
+          it "doesn't create an adjustment" do
+            expect {
+              subject.activate
+            }.to change { adjustable.adjustments.count }.by(0)
+          end
+        end
+
         context "promotion has item total rule" do
           let(:shirt) { create(:product) }
           let!(:rule) { Promotion::Rules::ItemTotal.create(preferred_operator: 'gt', preferred_amount: 50, promotion: promotion) }
